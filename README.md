@@ -1,28 +1,25 @@
 # NestJS REST API Boilerplate (Prisma)
 
-Combined boilerplate: notiz-dev structure + 7codeRO auth/CI + raminious REST simplicity.
 
 ## Stack
 
-- NestJS 10 + Express
+- NestJS 10 
 - Prisma + PostgreSQL
 - JWT auth (Passport)
 - Role-based guards
 - Swagger docs (`/docs`)
 - Global exception filter + logging interceptor
 - Rate limiting (Throttler)
-- Docker + docker-compose
 - GitHub Actions CI
 
 ## Setup
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres
-npm install
+pnpm install
 npx prisma migrate dev
-npm run prisma:seed
-npm run start:dev
+npx run prisma:seed
+npx run start:dev
 ```
 
 Swagger: `http://localhost:3000/docs`
@@ -48,9 +45,6 @@ prisma/
 ## Adding a new domain module
 
 ```bash
-nest g module products
-nest g controller products
-nest g service products
+pnpm exec nest g resource products --type rest --no-spec
 ```
 
-Follow `users/` pattern: DTO with `class-validator`, guard with `@Roles()`, response DTO to strip sensitive fields.
