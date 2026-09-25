@@ -1,0 +1,11 @@
+{
+  "name": "ticketing-cro-provision",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "nodemailer": "^6.9.16",
+    "pg": "^8.13.1",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -2,3 +2,5 @@
 /dist
 
 .env
+scripts/node_modules/
+scripts/output/

@@ -35,7 +35,12 @@ src/
 prisma/
   schema.prisma
   seed.ts
+scripts/
+  provision-cro-accounts.js   one-off inject akun CRO ticketing
+  move-klinik-tickets.js      pindah tiket team Klinik ke team klinik
 ```
+
+Cara menjalankan kedua script ada di `scripts/README.md`.
 
 ## Seed user
 
