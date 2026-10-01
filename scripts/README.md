@@ -60,17 +60,12 @@ Kredensial akun baru tertulis di `scripts/output/cro-dev-credentials.csv`. File 
 
 Script `move-klinik-tickets.js` memindahkan tiket di `docs/Ticket Active On Klinik.xlsx` dari team `Klinik` ke team tujuan (`expected_assigned_team`).
 
-Yang diubah hanya `team_id` tiket, plus satu history kolom `TEAM`. Agent dan status tidak diubah. Team tujuan harus sudah ada di database. Kalau team di database tidak sama dengan `existing_assigned_team`, tiket itu dilewati.
+Yang dipakai dari Excel hanya `existing_assigned_team`, `existing_assigned_agent`, `expected_assigned_team`, dan `expected_assigned_agent`. Yang diubah adalah `team_id` dan `agent_id`. Kalau `expected_assigned_agent` kosong, agent tiket dikosongkan. Perubahan team menulis history `TEAM`, perubahan agent menulis history `AGENT`. Status tidak dibaca dan tidak diubah. Team tujuan harus sudah ada di database. Kalau team di database bukan team lama dan juga bukan team tujuan, tiket itu dilewati.
 
-Script ini hanya membaca env production:
+Koneksi database sama dengan script provision akun CRO:
 
-- `TICKETING_PROD_DB_HOST`
-- `TICKETING_PROD_DB_PORT`
-- `TICKETING_PROD_DB_NAME`
-- `TICKETING_PROD_DB_USER`
-- `TICKETING_PROD_DB_PASS`
-
-Env dev (`TICKETING_DB_*`) tidak dipakai.
+- `TICKETING_DATABASE_URL`, atau
+- `TICKETING_DB_HOST`, `TICKETING_DB_PORT`, `TICKETING_DB_NAME`, `TICKETING_DB_USER`, `TICKETING_DB_PASS`
 
 Cek dulu. Perintah ini tidak menulis ke database:
 
@@ -84,4 +79,4 @@ Kalau laporannya sudah benar, jalankan perubahan:
 node scripts/move-klinik-tickets.js --execute --file "docs/Ticket Active On Klinik.xlsx"
 ```
 
-Laporan ada di `scripts/output/move-klinik-tickets-report.csv`. Jangan jalankan `--execute` sebelum env production terisi.
+Laporan ada di `scripts/output/move-klinik-tickets-report.csv`. Jangan jalankan `--execute` sebelum koneksi `TICKETING_DB_*` mengarah ke database yang benar.

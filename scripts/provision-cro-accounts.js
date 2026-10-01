@@ -7,12 +7,14 @@
  * - generate a password only for accounts that do not exist yet
  * - email the address and password only for those new accounts
  * Existing accounts keep their current password and are not emailed.
+ * Emails are sent one at a time, with one minute between each message.
  *
  * Usage (from rata-rest-api-boilerplate):
  *   node scripts/provision-cro-accounts.js --dry-run --file "docs/Request Akun Ticketing Untuk CRO.xlsx"
  *   node scripts/provision-cro-accounts.js --file "docs/Request Akun Ticketing Untuk CRO.xlsx"
  *   node scripts/provision-cro-accounts.js --skip-email --file "docs/Request Akun Ticketing Untuk CRO.xlsx"
  *   node scripts/provision-cro-accounts.js --resend-email
+ *   node scripts/provision-cro-accounts.js --smtp-test --to user@rata.id --name "Nama Orang"
  */
 
 const crypto = require("crypto");
@@ -33,25 +35,27 @@ const DEFAULT_WORKBOOK = path.resolve(
 );
 const PRIVILEGE_TEMPLATE_ROLE = "Agent - Klinik";
 const BCRYPT_ROUNDS = 12;
+const EMAIL_DELAY_MS = 60 * 1000;
 
 function parseArgs(argv) {
   const flags = new Set();
-  let file;
+  const options = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--file") {
-      file = argv[i + 1];
+    if (arg === "--file" || arg === "--to" || arg === "--name") {
+      options[arg.slice(2)] = argv[i + 1];
       i += 1;
-    } else if (arg.startsWith("--file=")) {
-      file = arg.slice("--file=".length);
+    } else if (arg.startsWith("--file=") || arg.startsWith("--to=") || arg.startsWith("--name=")) {
+      const separator = arg.indexOf("=");
+      options[arg.slice(2, separator)] = arg.slice(separator + 1);
     } else if (arg.startsWith("--")) {
       flags.add(arg);
     }
   }
-  return { flags, file };
+  return { flags, ...options };
 }
 
-const { flags, file: fileArg } = parseArgs(process.argv.slice(2));
+const { flags, file: fileArg, to: toArg, name: nameArg } = parseArgs(process.argv.slice(2));
 const dryRun = flags.has("--dry-run");
 const skipEmail = flags.has("--skip-email");
 const resendEmail = flags.has("--resend-email");
@@ -215,16 +219,32 @@ function readCredentials() {
   });
 }
 
+function loginLabel(loginUrl) {
+  try {
+    return new URL(loginUrl).host;
+  } catch {
+    return loginUrl;
+  }
+}
+
 function emailBody(record, loginUrl) {
+  const labelCell =
+    "padding:8px 12px;border:1px solid #d9d9d9;background:#f8d0cb;font-weight:600;white-space:nowrap;";
+  const valueCell = "padding:8px 12px;border:1px solid #d9d9d9;";
+  const row = (label, value) =>
+    `<tr><td style="${labelCell}">${label}</td><td style="${valueCell}">${value}</td></tr>`;
   return (
     `<p>Dear ${escapeHtml(record.name)},</p>` +
-    `<p>Akun E-Ticketing CRO Anda sudah diaktifkan.</p>` +
-    `<p>Team: ${escapeHtml(record.team)}<br/>Role: ${escapeHtml(record.role)}</p>` +
-    `<p>Berikut kredensial login:</p>` +
-    `<p>Email: ${escapeHtml(record.email)}<br/>Password: ${escapeHtml(record.password)}</p>` +
-    `<p>Silakan login di <a href="${loginUrl}">${loginUrl}</a></p>` +
-    `<p>Warm Regards,</p>` +
-    `<p>Ticketing Team</p>`
+    `<p>Akun E-Ticketing anda telah berhasil dibuat dengan detail sebagai berikut:</p>` +
+    `<table style="border-collapse:collapse;margin:16px 0;">` +
+    row("Nama", escapeHtml(record.name)) +
+    row("Email", escapeHtml(record.email)) +
+    row("Password", escapeHtml(record.password)) +
+    `</table>` +
+    `<p>Sistem E-Ticketing dapat diakses melalui link <a href="${escapeHtml(loginUrl)}">${escapeHtml(loginLabel(loginUrl))}</a></p>` +
+    `<p>Demi menjaga keamanan akun, mohon segera <strong>ganti kata sandi</strong> di atas setelah login pertama dan pastikan tidak menyebarkannya kepada pihak lain.</p>` +
+    `<p>Jika ada pertanyaan atau mengalami kendala saat login, silakan untuk dapat menghubungi saya dengan membalas email ini.</p>` +
+    `<p>Terima kasih</p>`
   );
 }
 
@@ -245,9 +265,43 @@ async function sendCredentialEmail(transport, mail, record, loginUrl) {
   await transport.sendMail({
     from: mail.from,
     to: record.email,
-    subject: "Aktivasi Akun E-Ticketing CRO",
+    subject: `Pembuatan Akun E-Ticketing - ${record.name}`,
     html: emailBody(record, loginUrl),
   });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function smtpRejected(error) {
+  return /535|BadCredentials|Invalid login/i.test(error.message);
+}
+
+async function sendPendingEmails(transport, mail, records, loginUrl) {
+  const pending = records.filter(
+    (record) => record.action === "created" && record.password && !record.emailSent
+  );
+  console.log(`email yang akan dikirim: ${pending.length}, jeda 1 menit`);
+  for (let index = 0; index < pending.length; index += 1) {
+    if (index > 0) {
+      console.log("menunggu 1 menit sebelum email berikutnya");
+      await sleep(EMAIL_DELAY_MS);
+    }
+    const record = pending[index];
+    try {
+      await sendCredentialEmail(transport, mail, record, loginUrl);
+      record.emailSent = true;
+      writeCredentials(records);
+      console.log(`email terkirim: ${record.email}`);
+    } catch (error) {
+      console.error(`email gagal: ${record.email} — ${error.message}`);
+      if (smtpRejected(error)) {
+        console.error("SMTP menolak login. Sisa email tidak dikirim.");
+        break;
+      }
+    }
+  }
 }
 
 async function ensureTeam(client, name, cache) {
@@ -300,12 +354,16 @@ async function ensureRole(client, name, teamId, templateRoleId, cache) {
     );
   }
   if (!dryRun && teamId > 0) {
-    await client.query(
-      `INSERT INTO teams_roles (role_id, team_id)
-       VALUES ($1, $2)
-       ON CONFLICT DO NOTHING`,
+    const link = await client.query(
+      "SELECT 1 FROM teams_roles WHERE role_id = $1 AND team_id = $2",
       [roleId, teamId]
     );
+    if (!link.rowCount) {
+      await client.query(
+        "INSERT INTO teams_roles (role_id, team_id) VALUES ($1, $2)",
+        [roleId, teamId]
+      );
+    }
   }
   cache.set(name, roleId);
   return { id: roleId, created };
@@ -422,16 +480,7 @@ async function provision() {
   if (!dryRun && !skipEmail) {
     const mail = mailConfig(env);
     const transport = createTransport(mail);
-    for (const record of records.filter((record) => record.action === "created")) {
-      try {
-        await sendCredentialEmail(transport, mail, record, loginUrl);
-        record.emailSent = true;
-        console.log(`email terkirim: ${record.email}`);
-      } catch (error) {
-        console.error(`email gagal: ${record.email} — ${error.message}`);
-      }
-    }
-    writeCredentials(records);
+    await sendPendingEmails(transport, mail, records, loginUrl);
   }
 
   const databaseName = env.TICKETING_DB_NAME || "ticketing";
@@ -462,19 +511,12 @@ async function resend() {
     ...record,
     emailSent: record.email_sent === "yes",
   }));
-  const toSend = records.filter((record) => record.action === "created" && record.password);
+  const toSend = records.filter(
+    (record) => record.action === "created" && record.password && !record.emailSent
+  );
   const mail = mailConfig(env);
   const transport = createTransport(mail);
-  for (const record of toSend) {
-    try {
-      await sendCredentialEmail(transport, mail, record, loginUrl);
-      record.emailSent = true;
-      console.log(`email terkirim: ${record.email}`);
-    } catch (error) {
-      console.error(`email gagal: ${record.email} — ${error.message}`);
-    }
-  }
-  writeCredentials(records);
+  await sendPendingEmails(transport, mail, records, loginUrl);
   console.log(
     JSON.stringify(
       {
@@ -487,7 +529,24 @@ async function resend() {
   );
 }
 
-const run = resendEmail ? resend() : provision();
+async function smtpTest() {
+  if (!toArg || !nameArg) {
+    throw new Error("Uji SMTP butuh --to dan --name. Contoh: --smtp-test --to user@rata.id --name \"Nama Orang\"");
+  }
+  const env = loadEnv(ENV_PATH);
+  const loginUrl = env.TICKETING_LOGIN_URL || "https://ticketing.rata.id/";
+  const mail = mailConfig(env);
+  const transport = createTransport(mail);
+  await sendCredentialEmail(
+    transport,
+    mail,
+    { name: nameArg, email: toArg, password: "UjiSmtp1@rata" },
+    loginUrl
+  );
+  console.log(`email uji terkirim ke ${toArg}`);
+}
+
+const run = flags.has("--smtp-test") ? smtpTest() : resendEmail ? resend() : provision();
 run.catch((error) => {
   console.error(error);
   process.exit(1);
